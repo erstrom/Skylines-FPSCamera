@@ -594,7 +594,10 @@ namespace FPSCamera
                     speedFactor *= config.goFasterSpeedMultiplier;
                 }
 
-                gameObject.transform.position += gameObject.transform.forward * config.cameraMoveSpeed * speedFactor * Time.deltaTime * gamePadLy;
+                Vector3 forward = gameObject.transform.forward;
+                forward.y = 0f;
+                forward.Normalize();
+                gameObject.transform.position += forward * config.cameraMoveSpeed * speedFactor * Time.deltaTime * gamePadLy;
                 gameObject.transform.position += gameObject.transform.right * config.cameraMoveSpeed * speedFactor * Time.deltaTime * gamePadLx;
 
                 if ((state.Gamepad.wButtons & XInputState.XINPUT_GAMEPAD_A) == XInputState.XINPUT_GAMEPAD_A)
@@ -608,6 +611,10 @@ namespace FPSCamera
                 
                 float rotationX = transform.localEulerAngles.y + gamePadRx * gamePadRightStickBaseAmplification * config.cameraRotationSensitivity * Time.deltaTime;
                 rotationY += gamePadRy * gamePadRightStickBaseAmplification * config.cameraRotationSensitivity * Time.deltaTime * (config.invertYAxis ? -1.0f : 1.0f);
+                if (rotationY > 89f)
+                    rotationY = 89f;
+                else if (rotationY < -89f)
+                    rotationY = -89f;
                 transform.localEulerAngles = new Vector3(-rotationY, rotationX, 0);
                 Cursor.visible = false;
             }
