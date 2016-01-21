@@ -72,6 +72,180 @@ namespace FPSCamera
 
         public static bool editorMode = false;
 
+        private class ToggleFuncStateMachine
+        {
+            private enum State
+            {
+                TriggerInactiveFuncInactive,
+                TriggerActiveFuncInactive,
+                TriggerInactiveFuncActive,
+                TriggerActiveFuncActive
+            }
+
+            private State state;
+
+            public ToggleFuncStateMachine()
+            {
+                state = State.TriggerInactiveFuncInactive;
+            }
+
+            public void updateState(bool triggerActive)
+            {
+                switch (state)
+                {
+                    case State.TriggerInactiveFuncInactive:
+                        if (triggerActive)
+                        {
+                            state = State.TriggerActiveFuncActive;
+                        }
+                        break;
+                    case State.TriggerActiveFuncActive:
+                        if (!triggerActive)
+                        {
+                            state = State.TriggerInactiveFuncActive;
+                        }
+                        break;
+                    case State.TriggerInactiveFuncActive:
+                        if (triggerActive)
+                        {
+                            state = State.TriggerActiveFuncInactive;
+                        }
+                        break;
+                    case State.TriggerActiveFuncInactive:
+                        if (!triggerActive)
+                        {
+                            state = State.TriggerInactiveFuncInactive;
+                        }
+                        break;
+                    default:
+                        state = State.TriggerInactiveFuncInactive;
+                        break;
+                }
+            }
+
+            public bool Output
+            {
+                get
+                {
+                    if (state == State.TriggerInactiveFuncInactive ||
+                        state == State.TriggerActiveFuncInactive)
+                    {
+                        return false;
+                    }
+                    else
+                    {
+                        return true;
+                    }
+                }
+            }
+       }
+
+        private class MovementStateMachine
+        {
+            /* Thresholds for movement state changes */
+            private const float movementThresholdUp = 0.9f;
+            private const float movementThresholdLow = 0.2f;
+            private const float transitionTimeThreshold = 0.1f;
+
+            private enum State
+            {
+                Init,
+                FirstFastUpTransition,
+                FirstFastLowTransition,
+                FastMove
+            }
+
+            private State state;
+            private float savedTime;
+            private float upTime;
+            private float lowTime;
+            private Configuration config;
+
+            public MovementStateMachine(Configuration config)
+            {
+                state = State.Init;
+                savedTime = upTime = lowTime = 0;
+                this.config = config;
+            }
+
+            public void updateState(float gamePadLy, float elapsedTime)
+            {
+                if (gamePadLy < movementThresholdUp && gamePadLy > movementThresholdLow)
+                {
+                    /* The movement state should not be updated if the left stick is 
+                    in between the two thresholds. */
+                    return;
+                }
+                float deltaTime = elapsedTime - savedTime;
+                savedTime = elapsedTime;
+                switch (state)
+                {
+                    case State.Init:
+                        if (gamePadLy > movementThresholdUp && deltaTime < config.controllerDoubleTapInterval / 1000)
+                        {
+                            //Log.Message("Init -> FastUpTransition "+deltaTime);
+                            state = State.FirstFastUpTransition;
+                            upTime = elapsedTime;
+                        }
+                        break;
+                    case State.FirstFastUpTransition:
+                        float upTimeDelta = elapsedTime - upTime;
+                        if (gamePadLy < movementThresholdLow && deltaTime < config.controllerDoubleTapInterval / 1000)
+                        {
+                            //Log.Message("FastUpTransition -> FastLowTransition " + deltaTime);
+                            state = State.FirstFastLowTransition;
+                            lowTime = elapsedTime;
+                        }
+                        else if (gamePadLy > movementThresholdLow && upTimeDelta > config.controllerDoubleTapInterval / 1000 ||
+                                 deltaTime > config.controllerDoubleTapInterval / 1000)
+                        {
+                            //Log.Message("FastUpTransition -> Init " + deltaTime);
+                            state = State.Init;
+                        }
+                        break;
+                    case State.FirstFastLowTransition:
+                        float lowTimeDelta = elapsedTime - lowTime;
+                        if (gamePadLy > movementThresholdUp && deltaTime < config.controllerDoubleTapInterval / 1000)
+                        {
+                            //Log.Message("FastLowTransition -> FastMove " + deltaTime);
+                            state = State.FastMove;
+                        }
+                        else if (gamePadLy < movementThresholdUp && lowTimeDelta > config.controllerDoubleTapInterval / 1000 ||
+                                 deltaTime > config.controllerDoubleTapInterval / 1000)
+                        {
+                            //Log.Message("FastLowTransition -> Init " + deltaTime);
+                            state = State.Init;
+                        }
+                        break;
+                    case State.FastMove:
+                        if (gamePadLy < movementThresholdUp)
+                        {
+                            //Log.Message("FastMove -> Init " + deltaTime);
+                            state = State.Init;
+                        }
+                        break;
+                    default:
+                        state = State.Init;
+                        break;
+                }
+            }
+
+            public bool Output
+            {
+                get
+                {
+                    if (state == State.FastMove)
+                    {
+                        return true;
+                    }
+                    else
+                    {
+                        return false;
+                    }
+                }
+            }
+        }
+
         public static void Initialize(LoadMode mode)
         {
             var controller = GameObject.FindObjectOfType<CameraController>();
@@ -130,6 +304,11 @@ namespace FPSCamera
 
         private const float gamePadRightStickBaseAmplification = 30f;
 
+        private ToggleFuncStateMachine showCursorSm;
+        private ToggleFuncStateMachine pauseGameSm;
+        private MovementStateMachine movementSm;
+        private float elapsedTime;
+
         void Start()
         {
             controller = FindObjectOfType<CameraController>();
@@ -172,6 +351,11 @@ namespace FPSCamera
             checkedForHideUI = true;
 
             ui = FPSCameraUI.Instance;
+
+            showCursorSm = new ToggleFuncStateMachine();
+            pauseGameSm = new ToggleFuncStateMachine();
+            movementSm = new MovementStateMachine(config);
+            elapsedTime = 0;
         }
 
         public void SaveConfig()
@@ -433,7 +617,7 @@ namespace FPSCamera
             try
             {
                 XInputState.XInputStateRaw state;
-                uint rc = NativeFuncs.XInputGetState(0, out state);
+                uint rc = NativeFuncs.XInputGetState(config.controllerNumber, out state);
                 if (rc != 0)
                 {
                     state.Gamepad.sThumbLX = 0;
@@ -588,15 +772,21 @@ namespace FPSCamera
                 gamePadLy = ((float)state.Gamepad.sThumbLY) / XInputState.LEFT_AXIS_NORM;
                 gamePadRx = ((float)state.Gamepad.sThumbRX) / XInputState.RIGHT_AXIS_NORM;
                 gamePadRy = ((float)state.Gamepad.sThumbRY) / XInputState.RIGHT_AXIS_NORM;
-                
-                if (Input.GetKey(config.goFasterHotKey))
+
+                movementSm.updateState(gamePadLy, elapsedTime);
+                elapsedTime += Time.deltaTime;
+
+                if (movementSm.Output)
                 {
-                    speedFactor *= config.goFasterSpeedMultiplier;
+                    speedFactor *= /*config.goFasterSpeedMultiplier*/ 10;
                 }
 
                 Vector3 forward = gameObject.transform.forward;
-                forward.y = 0f;
-                forward.Normalize();
+                if (!movementSm.Output)
+                {
+                    forward.y = 0f;
+                    forward.Normalize();
+                }
                 gameObject.transform.position += forward * config.cameraMoveSpeed * speedFactor * Time.deltaTime * gamePadLy;
                 gameObject.transform.position += gameObject.transform.right * config.cameraMoveSpeed * speedFactor * Time.deltaTime * gamePadLx;
 
@@ -608,6 +798,11 @@ namespace FPSCamera
                 {
                     gameObject.transform.position -= Vector3.up * config.cameraMoveSpeed * speedFactor * Time.deltaTime;
                 }
+                showCursorSm.updateState((state.Gamepad.wButtons & XInputState.XINPUT_GAMEPAD_X) == XInputState.XINPUT_GAMEPAD_X);
+                Cursor.visible = showCursorSm.Output;
+
+                pauseGameSm.updateState((state.Gamepad.wButtons & XInputState.XINPUT_GAMEPAD_Y) == XInputState.XINPUT_GAMEPAD_Y);
+                Singleton<SimulationManager>.instance.SimulationPaused = pauseGameSm.Output;
                 
                 float rotationX = transform.localEulerAngles.y + gamePadRx * gamePadRightStickBaseAmplification * config.cameraRotationSensitivity * Time.deltaTime;
                 rotationY += gamePadRy * gamePadRightStickBaseAmplification * config.cameraRotationSensitivity * Time.deltaTime * (config.invertYAxis ? -1.0f : 1.0f);
@@ -616,7 +811,6 @@ namespace FPSCamera
                 else if (rotationY < -89f)
                     rotationY = -89f;
                 transform.localEulerAngles = new Vector3(-rotationY, rotationX, 0);
-                Cursor.visible = false;
             }
             else
             {

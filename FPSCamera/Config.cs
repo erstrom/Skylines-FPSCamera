@@ -27,6 +27,8 @@ namespace FPSCamera
         public bool walkthroughModeManual = false;
         public bool allowUserOffsetInVehicleCitizenMode = false;
         public bool useController = false;
+        public uint controllerNumber = 0;
+        public float controllerDoubleTapInterval = 100f;
 
         public void OnPreSerialize()
         {

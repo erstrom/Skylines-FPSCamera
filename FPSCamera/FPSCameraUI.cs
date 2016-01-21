@@ -101,7 +101,7 @@ namespace FPSCamera
             };
 
             panel = fullscreenContainer.AddUIComponent<UIPanel>();
-            panel.size = new Vector2(400, 700);
+            panel.size = new Vector2(400, 800);
             panel.isVisible = false;
             panel.backgroundSprite = "SubcategoriesPanel";
             panel.relativePosition = new Vector3(cameraModeButton.relativePosition.x - panel.size.x, cameraModeButton.relativePosition.y + 60.0f);
@@ -326,6 +326,16 @@ namespace FPSCamera
                    });
 
                 y += 28.0f;
+
+                MakeSlider(panel, "ControllerDoubleTapInterval", "\"Double tap\" interval for \nfast movement in ms", y,
+                FPSCamera.instance.config.controllerDoubleTapInterval, 50f, 300f,
+                value =>
+                {
+                    FPSCamera.instance.config.controllerDoubleTapInterval = value;
+                    FPSCamera.instance.SaveConfig();
+                });
+
+                y += 28.0f + 16.0f;
 
                 var walkthroughModeButton = MakeButton(panel, "WalkthroughModeButton", "Enter walkthrough mode", y,
                     () =>
